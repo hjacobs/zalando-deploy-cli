@@ -1,0 +1,13 @@
+cloud_formation:
+  # set the AWS account ID
+  account_id: $account_id
+  # set the AWS region, e.g. "eu-central-1"
+  region: $region
+kubernetes:
+  # set the Kubernetes cluster ID (check with zkubectl list-clusters)
+  cluster_id: $cluster_id
+  namespace: default
+  # change the application ID:
+  application: nginx-hello-world
+  # number of pods to run
+  replicas: 3

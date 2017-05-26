@@ -430,17 +430,19 @@ def get_current_replicas(config, application):
 @click.option('--execute', is_flag=True)
 def scale_deployment(config, application, version, release, replicas, execute):
     '''Scale a single deployment'''
-    namespace = config.get('kubernetes_namespace')
     kubectl_login(config)
+    namespace = config.get('kubernetes_namespace')
+    name = '{}-{}-{}'.format(application, version, release)
+    _scale_deployment(config, name, namespace, replicas, execute)
 
-    deployment_name = '{}-{}-{}'.format(application, version, release)
 
-    info('Scaling deployment {} to {} replicas..'.format(deployment_name, replicas))
+def _scale_deployment(config, name, namespace, replicas, execute):
+    '''Scale a single deployment'''
+    info('Scaling deployment {} to {} replicas..'.format(name, replicas))
     resources_update = ResourcesUpdate()
-    resources_update.set_number_of_replicas(deployment_name, replicas)
+    resources_update.set_number_of_replicas(name, replicas)
 
     cluster_id = config.get('kubernetes_cluster')
-    namespace = config.get('kubernetes_namespace')
     path = '/kubernetes-clusters/{}/namespaces/{}/resources'.format(cluster_id, namespace)
     response = request(config, requests.patch, path, json=resources_update.to_dict())
     change_request_id = response.json()['id']
@@ -516,6 +518,71 @@ def delete(config, type, resource, execute):
         print(change_request_id)
 
 
+def get_replicas(name, namespace):
+    '''Get number of replicas for a deployment'''
+    deployment = kubectl_get(namespace, 'deployments', name)
+    return deployment.get('status', {}).get('replicas', 0)
+
+
+def delete_deployment(config, deployment, execute):
+    '''Delete deployment by first scaling down to 0, deleting the deployment
+    resource and any replicaset resources owned by the deployment.'''
+    cluster_id = config.get('kubernetes_cluster')
+    name = deployment['metadata']['name']
+    namespace = deployment['metadata']['namespace']
+
+    # scale deployment to 0 before deleting
+    _scale_deployment(config, name, namespace, 0, execute)
+
+    # with for deployment to be scaled down to 0
+    timeout = 30
+    maxtime = time.time() + timeout
+    while get_replicas(name, namespace) > 0:
+        if time.time() > maxtime:
+            error('Timed out af {:d}s waiting for deployment to scale down'.format(timeout))
+            return
+
+    # get replicasets owned by the deployment
+    replicasets = kubectl_get(namespace, 'replicasets')
+    owned_rs = get_owned_replicasets(deployment, replicasets['items'])
+
+    # delete deployment
+    info('Deleting deployment {}..'.format(name))
+    path = '/kubernetes-clusters/{}/namespaces/{}/deployments/{}'.format(
+        cluster_id, namespace, name)
+    response = request(config, requests.delete, path)
+    change_request_id = response.json()['id']
+
+    if execute:
+        approve_and_execute(config, change_request_id)
+    else:
+        print(change_request_id)
+
+    # delete replicasets
+    for rs in owned_rs:
+        name = rs['metadata']['name']
+        info('Deleting replicaset {}..'.format(name))
+        path = '/kubernetes-clusters/{}/namespaces/{}/replicasets/{}'.format(
+            cluster_id, namespace, name)
+        response = request(config, requests.delete, path)
+        change_request_id = response.json()['id']
+
+        if execute:
+            approve_and_execute(config, change_request_id)
+        else:
+            print(change_request_id)
+
+
+def get_owned_replicasets(deployment, replicasets) -> list:
+    '''Return all replicasets owned by a deployment'''
+    owned = []
+    for rs in replicasets:
+        for owner in rs['metadata'].get('ownerReferences', []):
+            if owner['uid'] == deployment['metadata']['uid']:
+                owned.append(rs)
+    return owned
+
+
 @cli.command('delete-old-deployments')
 @application_argument
 @version_argument
@@ -538,25 +605,14 @@ def delete_old_deployments(config, application, version, release, execute):
         if deployment_name == target_deployment_name:
             deployment_found = True
         else:
-            deployments_to_delete.append(deployment_name)
+            deployments_to_delete.append(deployment)
 
     if not deployment_found:
         error('Deployment {} was not found.'.format(target_deployment_name))
         raise click.Abort()
 
-    for deployment_name in deployments_to_delete:
-        info('Deleting deployment {}..'.format(deployment_name))
-        cluster_id = config.get('kubernetes_cluster')
-        namespace = config.get('kubernetes_namespace')
-        path = '/kubernetes-clusters/{}/namespaces/{}/deployments/{}'.format(
-            cluster_id, namespace, deployment_name)
-        response = request(config, requests.delete, path)
-        change_request_id = response.json()['id']
-
-        if execute:
-            approve_and_execute(config, change_request_id)
-        else:
-            print(change_request_id)
+    for deployment in deployments_to_delete:
+        delete_deployment(config, deployment, execute)
 
 
 @cli.command('render-template')

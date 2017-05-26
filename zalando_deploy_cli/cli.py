@@ -27,6 +27,7 @@ APPLICATION_PATTERN = re.compile('^[a-z][a-z0-9-]*$')
 VERSION_PATTERN = re.compile('^[a-z0-9][a-z0-9.-]*$')
 
 DEFAULT_HTTP_TIMEOUT = 30  # seconds
+DEFAULT_RESOURCE_DELETION_TIMEOUT = 30 # seconds
 
 # EC2 instance memory in MiB
 EC2_INSTANCE_MEMORY = {
@@ -535,11 +536,11 @@ def delete_deployment(config, deployment, execute):
     _scale_deployment(config, name, namespace, 0, execute)
 
     # with for deployment to be scaled down to 0
-    timeout = 30
+    timeout = DEFAULT_RESOURCE_DELETION_TIMEOUT
     maxtime = time.time() + timeout
     while get_replicas(name, namespace) > 0:
         if time.time() > maxtime:
-            error('Timed out af {:d}s waiting for deployment to scale down'.format(timeout))
+            error('Timed out after {:d}s waiting for deployment to scale down'.format(timeout))
             return
 
     # get replicasets owned by the deployment

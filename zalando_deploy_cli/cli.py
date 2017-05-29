@@ -28,7 +28,7 @@ APPLICATION_PATTERN = re.compile('^[a-z][a-z0-9-]*$')
 VERSION_PATTERN = re.compile('^[a-z0-9][a-z0-9.-]*$')
 
 DEFAULT_HTTP_TIMEOUT = 30  # seconds
-DEFAULT_RESOURCE_DELETION_TIMEOUT = 30 # seconds
+DEFAULT_RESOURCE_DELETION_TIMEOUT = 30  # seconds
 
 # EC2 instance memory in MiB
 EC2_INSTANCE_MEMORY = {

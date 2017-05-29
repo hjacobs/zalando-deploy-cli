@@ -1,7 +1,4 @@
-import json
 import pytest
-import requests
-import yaml
 from pathlib import Path
 import zalando_deploy_cli.cli
 from unittest.mock import MagicMock, ANY

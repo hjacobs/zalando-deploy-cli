@@ -6,7 +6,7 @@ import zalando_deploy_cli.cli
 from unittest.mock import MagicMock, ANY
 
 from click.testing import CliRunner
-from zalando_deploy_cli.cli import cli
+from zalando_deploy_cli.cli import cli, get_replicas, get_owned_replicasets, delete_deployment
 
 
 @pytest.fixture
@@ -130,6 +130,19 @@ def test_switch_deployment_target_does_not_exist(monkeypatch, mock_config):
     assert result.exit_code == 1
 
 
+def test_scale_deployment(monkeypatch, mock_config):
+    request = MagicMock()
+    request.return_value.json.return_value = {'id': 'my-change-request-id'}
+
+    monkeypatch.setattr('zalando_deploy_cli.cli.kubectl_login', MagicMock())
+    monkeypatch.setattr('zalando_deploy_cli.cli.request', request)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ['scale-deployment', 'myapp', 'v2', 'r42', '1'])
+    assert ('Scaling deployment myapp-v2-r42 to 1 replicas..\n'
+            'my-change-request-id' == result.output.strip())
+
+
 def test_delete_old_deployments(monkeypatch, mock_config):
     def check_output(cmd):
         assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o', 'json', 'deployments', '-l',
@@ -148,14 +161,68 @@ def test_delete_old_deployments(monkeypatch, mock_config):
 
     monkeypatch.setattr('zalando_deploy_cli.cli.kubectl_login', MagicMock())
     monkeypatch.setattr('zalando_deploy_cli.cli.request', request)
+    monkeypatch.setattr('zalando_deploy_cli.cli.delete_deployment', MagicMock())
     monkeypatch.setattr('subprocess.check_output', check_output)
 
     runner = CliRunner()
-    result = runner.invoke(cli, ['delete-old-deployments', 'myapp', 'v2', 'r42'])
-    assert ('Deleting deployment myapp-v2-r41..\n'
-            'my-change-request-id\n'
-            'Deleting deployment myapp-v2-r40..\n'
-            'my-change-request-id' == result.output.strip())
+    runner.invoke(cli, ['delete-old-deployments', 'myapp', 'v2', 'r42'])
+
+
+def test_get_replicas(monkeypatch, mock_config):
+    def check_output(cmd):
+        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o', 'json', 'deployments', 'mydeployment']
+        output = {'status': {'replicas': 0}}
+        return json.dumps(output).encode('utf-8')
+
+    monkeypatch.setattr('subprocess.check_output', check_output)
+
+    assert get_replicas('mydeployment', 'mynamespace') == 0
+
+
+def test_get_owned_replicasets(monkeypatch, mock_config):
+    deployment = {'metadata': {'uid': 'id'}}
+    replicasets = [
+        {'metadata': {'ownerReferences': [{'uid': 'id'}]}},
+        {'metadata': {}},
+    ]
+
+    assert get_owned_replicasets(deployment, replicasets) == [{'metadata': {'ownerReferences': [{'uid': 'id'}]}}]
+
+
+def test_delete_deployment(monkeypatch, mock_config):
+    def check_output(cmd):
+        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o', 'json', 'replicasets']
+        output = {
+            'items': [
+                {'metadata': {
+                    'ownerReferences': [{'uid': 'id'}],
+                    'name': 'myreplicasets',
+                }},
+                {'metadata': {'name': 'myotherreplicasets'}},
+            ]
+        }
+        return json.dumps(output).encode('utf-8')
+
+    def get_replicas(name, namespace):
+        return 0
+
+    deployment = {
+        'metadata': {
+            'uid': 'id',
+            'name': 'mydeployment',
+            'namespace': 'mynamespace',
+        },
+    }
+
+    request = MagicMock()
+    request.return_value.json.return_value = {'id': 'my-change-request-id'}
+
+    monkeypatch.setattr('zalando_deploy_cli.cli.request', request)
+    monkeypatch.setattr('zalando_deploy_cli.cli._scale_deployment', MagicMock())
+    monkeypatch.setattr('zalando_deploy_cli.cli.get_replicas', get_replicas)
+    monkeypatch.setattr('subprocess.check_output', check_output)
+
+    delete_deployment(mock_config, deployment, True)
 
 
 def test_promote_deployment(monkeypatch, mock_config):

@@ -7,6 +7,7 @@ import sys
 import textwrap
 import time
 import urllib.parse
+import errno
 from pathlib import Path
 
 import click
@@ -703,7 +704,15 @@ def copy_template(template_path: Path, path: Path, variables: dict):
             raise click.UsageError('Target file "{}" already exists. Aborting!'.format(target_path))
         else:
             with Action('Writing {}..'.format(target_path)):
-                target_path.parent.mkdir(parents=True, exist_ok=True)
+                # pathlib,Path.parent.mkdir keyword argument "exist_ok" where implemented
+                # in python 3.5 and backported only to python 2.7 pathlib2 - but not to python 3.4 pathlib
+                try:
+                    target_path.parent.mkdir(parents=True)
+                except FileExistsError:
+                    pass
+                except IOError as e:
+                    if e.errno != errno.EEXIST:
+                        raise
                 with d.open() as fd:
                     contents = fd.read()
                 template = string.Template(contents)

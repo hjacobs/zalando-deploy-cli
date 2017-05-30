@@ -14,7 +14,7 @@ version=$1
 
 sed -i "s/__version__ = .*/__version__ = '${version}'/" */__init__.py
 
-tox
+tox --skip-missing-interpreters
 
 python3 setup.py sdist bdist_wheel upload
 

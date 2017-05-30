@@ -211,13 +211,7 @@ def apply(config, template_or_directory, parameter, execute):
     # try to find previous release of a service.
     data = kubectl_get(namespace, 'services', '-l', 'application={}'.format(context['application']))
 
-    if len(data["items"]) == 0:
-        prev_release = context["release"]
-    else:
-        sorted(data["items"], key=lambda x: x["metadata"]["labels"]["release"])
-        prev_release = data["items"][-1]["metadata"]["labels"]["release"]
-
-    context["prev_release"] = prev_release
+    context["prev_release"] = get_prev_release(data['items'], context['release'])
 
     for path in template_paths:
         with open(path, 'r') as fd:
@@ -943,6 +937,15 @@ def init(config, directory, template, from_senza, kubernetes_cluster):
     notes = path / 'NOTES.txt'
     with notes.open() as fd:
         print(fd.read())
+
+
+def get_prev_release(services, current_release):
+    if len(services) == 0:
+        prev_release = current_release
+    else:
+        sorted(services, key=lambda s: int(s["metadata"].get("labels", {}).get("release", "0")))
+        prev_release = services[-1]["metadata"].get("labels", {}).get("release", None) or current_release
+    return prev_release
 
 
 def main():

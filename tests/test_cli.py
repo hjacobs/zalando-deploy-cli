@@ -6,7 +6,7 @@ import zalando_deploy_cli.cli
 from unittest.mock import MagicMock, ANY
 
 from click.testing import CliRunner
-from zalando_deploy_cli.cli import cli, get_replicas, get_owned_replicasets, delete_deployment
+from zalando_deploy_cli.cli import cli, get_replicas, get_owned_replicasets, delete_deployment, get_prev_release
 
 
 @pytest.fixture
@@ -44,6 +44,43 @@ def test_create_deployment_success(monkeypatch):
 
         result = runner.invoke(cli, ['create-deployment', 'template.yaml', 'my-app', 'v1', 'r1', 'replicas=3'])
     assert 'my-cr-id' == result.output.strip()
+
+
+def test_apply(monkeypatch, mock_config):
+    def check_output(cmd):
+        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o', 'json', 'services',
+                       '-l', 'application=myapp']
+        output = {
+            'items': [
+                {'metadata': {'name': 'myapp-r40', 'labels': {'application': 'myapp'}}},
+                {'metadata': {'name': 'myapp-r41', 'labels': {'application': 'myapp'}}},
+                {'metadata': {'name': 'myapp-r42', 'labels': {'application': 'myapp'}}},
+            ]
+        }
+        return json.dumps(output).encode('utf-8')
+
+    def _render_template(fd, context):
+        assert context["release"] == "2"
+        return {"kind": "Service"}
+
+    request = MagicMock()
+    request.return_value.json.return_value = {'id': 'my-change-request-id'}
+
+    monkeypatch.setattr('zalando_deploy_cli.cli.kubectl_login', MagicMock())
+    monkeypatch.setattr('zalando_deploy_cli.cli.request', request)
+    monkeypatch.setattr('zalando_deploy_cli.cli._render_template', _render_template)
+    monkeypatch.setattr('subprocess.check_output', check_output)
+
+    runner = CliRunner()
+    with runner.isolated_filesystem():
+        with open('manifest.yaml', 'w') as f:
+            f.write("apiVersion: v1\nkind: Pod")
+
+        result = runner.invoke(cli, ['apply', 'manifest.yaml', 'replicas=1', 'application=myapp',
+                                'release=2', 'version=v1.0'])
+        assert ('Applying Kubernetes manifest manifest.yaml..\n'
+                'my-change-request-id' == result.output.strip())
+        assert result.exception == None
 
 
 def test_switch_deployment(monkeypatch, mock_config):
@@ -299,3 +336,10 @@ def test_resolve_version(monkeypatch):
         result = runner.invoke(cli, ['resolve-version', 'template.yaml', 'my-app', 'latest', 'r1', 'replicas=3'], catch_exceptions=False)
         print(result)
     assert 'cd123' == result.output.strip()
+
+
+def test_get_prev_release(monkeypatch):
+    services = [
+                {'metadata': {'name': 'myapp-r40', 'labels': {'application': 'myapp', 'release': '2'}}},
+            ]
+    assert '2' == get_prev_release(services, "1")

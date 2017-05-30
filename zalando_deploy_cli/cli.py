@@ -27,6 +27,9 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 APPLICATION_PATTERN = re.compile('^[a-z][a-z0-9-]*$')
 VERSION_PATTERN = re.compile('^[a-z0-9][a-z0-9.-]*$')
 
+# ~1 == / in json patch
+INGRESS_BACKEND_WEIGHT_ANNOTATION_KEY = 'zalando.org~1backend-weights'
+
 DEFAULT_HTTP_TIMEOUT = 30  # seconds
 DEFAULT_RESOURCE_DELETION_TIMEOUT = 30  # seconds
 
@@ -136,6 +139,14 @@ class ResourcesUpdate:
             'operations': [{'op': 'replace', 'path': path, 'value': label_value}]
         })
 
+    def set_annotation(self, name: str, key: str, value: str, kind: str='deployments'):
+        path = '/metadata/annotations/{}'.format(key)
+        self.resources_update.append({
+            'name': name,
+            'kind': kind,
+            'operations': [{'op': 'replace', 'path': path, 'value': value}]
+        })
+
     def to_dict(self):
         return {'resources_update': self.resources_update}
 
@@ -194,9 +205,23 @@ def apply(config, template_or_directory, parameter, execute):
     else:
         template_paths.append(template_or_directory)
 
+    context = parse_parameters(parameter)
+    namespace = config.get('kubernetes_namespace')
+
+    # try to find previous release of a service.
+    data = kubectl_get(namespace, 'services', '-l', 'application={}'.format(context['application']))
+
+    if len(data["items"]) == 0:
+        prev_release = context["release"]
+    else:
+        sorted(data["items"], key=lambda x: x["metadata"]["labels"]["release"])
+        prev_release = data["items"][-1]["metadata"]["labels"]["release"]
+
+    context["prev_release"] = prev_release
+
     for path in template_paths:
         with open(path, 'r') as fd:
-            data = _render_template(fd, parse_parameters(parameter))
+            data = _render_template(fd, context)
 
         if not isinstance(data, dict):
             error('Invalid YAML contents in {}'.format(path))
@@ -483,6 +508,61 @@ def apply_autoscaling(config, template, application, version, release, parameter
         print(change_request_id)
 
 
+@cli.command('traffic')
+@application_argument
+@release_argument
+@click.argument('percent', type=click.IntRange(0, 100))
+@click.pass_obj
+@click.option('--execute', is_flag=True)
+def traffic(config, application, release, percent, execute):
+    cluster_id = config.get('kubernetes_cluster')
+    namespace = config.get('kubernetes_namespace')
+
+    backend = '{}-{}'.format(application, release)
+
+    ingress = kubectl_get(namespace, 'ingresses', application)
+
+    backend_weights = {}
+
+    for rule in ingress['spec']['rules']:
+        path_backends = {}
+        for path in rule['http']['paths']:
+            if path.get('path', '') in path_backends:
+                path_backends[path.get('path', '')][path['backend']['serviceName']] = 0
+            else:
+                path_backends[path.get('path', '')] = {path['backend']['serviceName']: 0}
+
+        for path, backends in path_backends.items():
+            if backend in backends:
+                for b in backends:
+                    if b == backend:
+                        weight = percent
+                    else:
+                        weight = (100 - percent) / (len(backends) - 1)
+                    backends[b] = weight
+                backend_weights = backends
+                break
+
+    if len(backend_weights) == 0:
+        error('Failed to find ingress backend {}'.format(backend))
+        raise click.Abort()
+
+    # update ingress resource
+    resources_update = ResourcesUpdate()
+    resources_update.set_annotation(application,
+                                    INGRESS_BACKEND_WEIGHT_ANNOTATION_KEY,
+                                    json.dumps(backend_weights),
+                                    'ingresses')
+    path = '/kubernetes-clusters/{}/namespaces/{}/resources'.format(cluster_id, namespace)
+    response = request(config, requests.patch, path, json=resources_update.to_dict())
+    change_request_id = response.json()['id']
+
+    if execute:
+        approve_and_execute(config, change_request_id)
+    else:
+        print(change_request_id)
+
+
 @cli.command('delete')
 @click.argument('type', type=click.Choice(['kubernetes', 'cloudformation']))
 @click.argument('resource')
@@ -615,6 +695,49 @@ def delete_old_deployments(config, application, version, release, execute):
 
     for deployment in deployments_to_delete:
         delete_deployment(config, deployment, execute)
+
+
+@cli.command('delete-old-services')
+@application_argument
+@version_argument
+@release_argument
+@click.pass_obj
+@click.option('--execute', is_flag=True)
+def delete_old_services(config, application, version, release, execute):
+    '''Delete old releases'''
+    namespace = config.get('kubernetes_namespace')
+    kubectl_login(config)
+
+    data = kubectl_get(namespace, 'services', '-l', 'application={}'.format(application))
+    services = data['items']
+    target_service_name = '{}-{}'.format(application, release)
+    services_to_delete = []
+    service_found = False
+
+    for service in sorted(services, key=lambda d: d['metadata']['name'], reverse=True):
+        service_name = service['metadata']['name']
+        if service_name == target_service_name:
+            service_found = True
+        else:
+            services_to_delete.append(service_name)
+
+    if not service_found:
+        error('Service {} was not found.'.format(target_service_name))
+        raise click.Abort()
+
+    for service_name in services_to_delete:
+        info('Deleting service {}..'.format(service_name))
+        cluster_id = config.get('kubernetes_cluster')
+        namespace = config.get('kubernetes_namespace')
+        path = '/kubernetes-clusters/{}/namespaces/{}/services/{}'.format(
+            cluster_id, namespace, service_name)
+        response = request(config, requests.delete, path)
+        change_request_id = response.json()['id']
+
+        if execute:
+            approve_and_execute(config, change_request_id)
+        else:
+            print(change_request_id)
 
 
 @cli.command('render-template')

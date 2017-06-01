@@ -1,0 +1,67 @@
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: "{{ application }}-{{ version }}-{{ release }}"
+spec:
+  replicas: {{ replicas }}
+  template:
+    metadata:
+      labels:
+        application: "{{ application }}"
+        version: "{{ version }}"
+        release: "{{ release }}"
+        stage: production
+      ## OPTIONAL: AWS IAM role (must be created separately via CF) to use
+      # annotations:
+      #   iam.amazonaws.com/role: "app-{{ application }}"
+    spec:
+      # AppDynamics INIT Container - please change the APPDYNAMICS_AGENT_APPLICATION_NAME
+      initContainers:
+      - name: javaappagent
+        image: pierone.stups.zalan.do/monitoring-appdynamics/javaappagent:latest
+        volumeMounts:
+        - name: agents-volume
+          mountPath: /agents
+        env:
+          - name: APPDYNAMICS_AGENT_APPLICATION_NAME
+            value: "CHANGE_ME"
+      containers:
+        - name: "{{ application }}"
+          image: "registry.opensource.zalan.do/teapot/nginx-hello-world:{{ version }}"
+          volumeMounts:
+          - name: agents-volume
+            mountPath: /agents
+          env:
+            # AppDynamics specific settings - don't change
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: APPDYNAMICS_ANALYTICS_URL
+              value: http://$(NODE_NAME):9090/v1/sinks/bt
+            # for JVM applications:
+            # set the maximum available memory as JVM would assume host/node capacity otherwise
+            # this is evaluated by java-dynamic-memory-opts in the Zalando OpenJDK base image
+            # see https://github.com/zalando/docker-openjdk
+            - name: MEM_TOTAL_KB
+              valueFrom:
+                resourceFieldRef:
+                  resource: limits.memory
+                  divisor: 1Ki
+            - name: SOME_ENV_VAR
+              value: "Some example config value"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 200Mi
+            limits:
+              memory: 200Mi
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+      volumes:
+      - name: agents-volume
+        emptyDir: {}              

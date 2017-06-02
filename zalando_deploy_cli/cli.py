@@ -27,8 +27,7 @@ CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 APPLICATION_PATTERN = re.compile('^[a-z][a-z0-9-]*$')
 VERSION_PATTERN = re.compile('^[a-z0-9][a-z0-9.-]*$')
 
-# ~1 == / in json patch
-INGRESS_BACKEND_WEIGHT_ANNOTATION_KEY = 'zalando.org~1backend-weights'
+INGRESS_BACKEND_WEIGHT_ANNOTATION_KEY = 'zalando.org/backend-weights'
 
 DEFAULT_HTTP_TIMEOUT = 30  # seconds
 DEFAULT_RESOURCE_DELETION_TIMEOUT = 30  # seconds
@@ -504,18 +503,47 @@ def apply_autoscaling(config, template, application, version, release, parameter
 
 @cli.command('traffic')
 @application_argument
-@release_argument
-@click.argument('percent', type=click.IntRange(0, 100))
+@click.argument('release', required=False)
+@click.argument('percent', required=False, type=click.IntRange(0, 100))
 @click.pass_obj
 @click.option('--execute', is_flag=True)
 def traffic(config, application, release, percent, execute):
     cluster_id = config.get('kubernetes_cluster')
     namespace = config.get('kubernetes_namespace')
 
-    backend = '{}-{}'.format(application, release)
-
     ingress = kubectl_get(namespace, 'ingresses', application)
 
+    if release is None and percent is None:
+        print(json.dumps(get_ingress_backends(ingress)))
+        return
+
+    backend = '{}-{}'.format(application, release)
+
+    backend_weights = calculate_backend_weights(ingress, backend, percent)
+
+    if len(backend_weights) == 0:
+        error('Failed to find ingress backends {}'.format(backend))
+        raise click.Abort()
+
+    # update ingress resource
+    resources_update = ResourcesUpdate()
+    resources_update.set_annotation(application,
+                                    # ~1 == / in json patch
+                                    INGRESS_BACKEND_WEIGHT_ANNOTATION_KEY.replace('/', '~1'),
+                                    json.dumps(backend_weights),
+                                    'ingresses')
+    path = '/kubernetes-clusters/{}/namespaces/{}/resources'.format(cluster_id, namespace)
+    response = request(config, requests.patch, path, json=resources_update.to_dict())
+    change_request_id = response.json()['id']
+
+    if execute:
+        approve_and_execute(config, change_request_id)
+    else:
+        print(change_request_id)
+
+
+def calculate_backend_weights(ingress, backend, percent):
+    '''Get backends from an ingress object'''
     backend_weights = {}
 
     for rule in ingress['spec']['rules']:
@@ -537,24 +565,46 @@ def traffic(config, application, release, percent, execute):
                 backend_weights = backends
                 break
 
-    if len(backend_weights) == 0:
-        error('Failed to find ingress backend {}'.format(backend))
-        raise click.Abort()
+    return backend_weights
 
-    # update ingress resource
-    resources_update = ResourcesUpdate()
-    resources_update.set_annotation(application,
-                                    INGRESS_BACKEND_WEIGHT_ANNOTATION_KEY,
-                                    json.dumps(backend_weights),
-                                    'ingresses')
-    path = '/kubernetes-clusters/{}/namespaces/{}/resources'.format(cluster_id, namespace)
-    response = request(config, requests.patch, path, json=resources_update.to_dict())
-    change_request_id = response.json()['id']
 
-    if execute:
-        approve_and_execute(config, change_request_id)
-    else:
-        print(change_request_id)
+def get_ingress_backends(ingress):
+    '''Get ingress backends along with their specified or calculated traffic
+    weight'''
+
+    backend_weights = json.loads(ingress['metadata'].get('annotations', {}).get(
+        INGRESS_BACKEND_WEIGHT_ANNOTATION_KEY, "{}"))
+
+    backends = {}
+
+    for rule in ingress['spec']['rules']:
+        path_sum_count = {}
+
+        # get backend weight sum and count of all backends for all paths
+        for path in rule['http']['paths']:
+            p = path.get('path', '')
+            if p not in path_sum_count:
+                sc = {'sum': 0, 'count': 0}
+                path_sum_count[p] = sc
+            else:
+                sc = path_sum_count[p]
+
+            sc['sum'] += backend_weights.get(path['backend']['serviceName'], 0)
+            sc['count'] += 1
+
+        # calculate traffic weight for each backend
+        for path in rule['http']['paths']:
+            p = path.get('path', '')
+            sc = path_sum_count[p]
+            backend = path['backend']['serviceName']
+            weight = backend_weights.get(backend, 0)
+            if sc['sum'] <= 0:
+                # special case: all weights are zero, every backend gets same traffic
+                backends[backend] = int(100 / sc['count'])
+            else:
+                backends[backend] = int(weight / sc['sum'] * 100)
+
+    return backends
 
 
 @cli.command('delete')

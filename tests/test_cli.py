@@ -6,7 +6,14 @@ import zalando_deploy_cli.cli
 from unittest.mock import MagicMock, ANY
 
 from click.testing import CliRunner
-from zalando_deploy_cli.cli import cli, get_replicas, get_owned_replicasets, delete_deployment, get_prev_release
+from zalando_deploy_cli.cli import (cli,
+                                    get_replicas,
+                                    get_owned_replicasets,
+                                    delete_deployment,
+                                    get_prev_release,
+                                    calculate_backend_weights,
+                                    INGRESS_BACKEND_WEIGHT_ANNOTATION_KEY,
+                                    get_ingress_backends)
 
 
 @pytest.fixture
@@ -178,6 +185,169 @@ def test_scale_deployment(monkeypatch, mock_config):
     result = runner.invoke(cli, ['scale-deployment', 'myapp', 'v2', 'r42', '1'])
     assert ('Scaling deployment myapp-v2-r42 to 1 replicas..\n'
             'my-change-request-id' == result.output.strip())
+
+
+def test_traffic(monkeypatch, mock_config):
+    def check_output(cmd):
+        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o', 'json', 'ingresses',
+                       'myapp']
+        output = {'metadata': {'name': 'myapp-v2-r40'}}
+
+        return json.dumps(output).encode('utf-8')
+
+    def calculate_backend_weights(ingress, backend, percent):
+        return {backend: percent}
+
+    request = MagicMock()
+    request.return_value.json.return_value = {'id': 'my-change-request-id'}
+
+    monkeypatch.setattr('zalando_deploy_cli.cli.kubectl_login', MagicMock())
+    monkeypatch.setattr('zalando_deploy_cli.cli.request', request)
+    monkeypatch.setattr('zalando_deploy_cli.cli.calculate_backend_weights', calculate_backend_weights)
+    monkeypatch.setattr('subprocess.check_output', check_output)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ['traffic', 'myapp', '2', '20'])
+    assert result.exception == None
+    assert ('my-change-request-id' == result.output.strip())
+
+
+def test_calculate_backend_weights(monkeypatch):
+    test_cases = [
+            {
+                'percent': 100,
+                'backend': 'a',
+                'ingress': {
+                    'spec': {
+                        'rules': [
+                            {
+                                'http': {
+                                    'paths': [
+                                        {'backend': {'serviceName': 'a'}}
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                },
+                'expected': {'a': 100}
+            },
+            {
+                'percent': 30,
+                'backend': 'a',
+                'ingress': {
+                    'spec': {
+                        'rules': [
+                            {
+                                'http': {
+                                    'paths': [
+                                        {'backend': {'serviceName': 'a'}},
+                                        {'backend': {'serviceName': 'b'}},
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                },
+                'expected': {'a': 30, 'b': 70}
+            },
+    ]
+
+    for tc in test_cases:
+        weights = calculate_backend_weights(tc['ingress'], tc['backend'], tc['percent'])
+        assert weights == tc['expected']
+
+
+def test_get_ingress_backends(monkeypatch):
+    test_cases = [
+            {
+                'ingress': {
+                    'metadata': {
+                        'annotations': {
+                            INGRESS_BACKEND_WEIGHT_ANNOTATION_KEY: '{"a":30}',
+                        },
+                    },
+                    'spec': {
+                        'rules': [
+                            {
+                                'http': {
+                                    'paths': [
+                                        {'backend': {'serviceName': 'a'}}
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                },
+                'expected': {'a': 100}
+            },
+            {
+                'ingress': {
+                    'metadata': {
+                        'annotations': {
+                            INGRESS_BACKEND_WEIGHT_ANNOTATION_KEY: '{"a":30}',
+                        },
+                    },
+                    'spec': {
+                        'rules': [
+                            {
+                                'http': {
+                                    'paths': [
+                                        {'backend': {'serviceName': 'a'}},
+                                        {'backend': {'serviceName': 'b'}}
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                },
+                'expected': {'a': 100, 'b': 0}
+            },
+            {
+                'ingress': {
+                    'metadata': {
+                        'annotations': {
+                            INGRESS_BACKEND_WEIGHT_ANNOTATION_KEY: '{"a":30, "b": 70}',
+                        },
+                    },
+                    'spec': {
+                        'rules': [
+                            {
+                                'http': {
+                                    'paths': [
+                                        {'backend': {'serviceName': 'a'}},
+                                        {'backend': {'serviceName': 'b'}},
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                },
+                'expected': {'a': 30, 'b': 70}
+            },
+            {
+                'ingress': {
+                    'metadata': {},
+                    'spec': {
+                        'rules': [
+                            {
+                                'http': {
+                                    'paths': [
+                                        {'backend': {'serviceName': 'a'}},
+                                        {'backend': {'serviceName': 'b'}},
+                                    ]
+                                }
+                            }
+                        ]
+                    }
+                },
+                'expected': {'a': 50, 'b': 50}
+            },
+    ]
+
+    for tc in test_cases:
+        weights = get_ingress_backends(tc['ingress'])
+        assert weights == tc['expected']
 
 
 def test_delete_old_deployments(monkeypatch, mock_config):

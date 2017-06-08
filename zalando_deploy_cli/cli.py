@@ -624,10 +624,15 @@ def delete(config, type, resource, execute):
         kind, name = parts
 
         info('Deleting Kubernetes {} {}..'.format(kind, name))
-        cluster_id = config.get('kubernetes_cluster')
-        namespace = config.get('kubernetes_namespace')
-        path = '/kubernetes-clusters/{}/namespaces/{}/{}/{}'.format(
-            cluster_id, namespace, kind, name)
+
+        if kind == 'deployments':
+            delete_deployment(config, name, execute)
+            return
+        else:
+            cluster_id = config['kubernetes_cluster']
+            namespace = config['kubernetes_namespace']
+            path = '/kubernetes-clusters/{}/namespaces/{}/{}/{}'.format(
+                cluster_id, namespace, kind, name)
     else:
         info('Deleting Cloud Formation stack {}..'.format(resource))
         aws_account = config.get('aws_account')

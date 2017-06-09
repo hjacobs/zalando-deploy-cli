@@ -396,6 +396,44 @@ def test_get_owned_replicasets(monkeypatch, mock_config):
     assert get_owned_replicasets(deployment, replicasets) == [{'metadata': {'ownerReferences': [{'uid': 'id'}]}}]
 
 
+def test_delete(monkeypatch, mock_config):
+    def kubectl_get(namespace, *args):
+        if args[0] == 'replicasets':
+            output = {
+                'items': [
+                    {'metadata': {
+                        'ownerReferences': [{'uid': 'id'}],
+                        'name': 'myreplicasets',
+                    }},
+                    {'metadata': {'name': 'myotherreplicasets'}},
+                ]
+            }
+        elif args[0] == 'deployments':
+            output = {
+                'metadata': {
+                    'uid': 'id',
+                    'name': 'mydeployment',
+                    'namespace': 'mynamespace',
+                },
+            }
+        return output
+
+    def get_replicas(name, namespace):
+        return 0
+
+    request = MagicMock()
+    request.return_value.json.return_value = {'id': 'my-change-request-id'}
+
+    monkeypatch.setattr('zalando_deploy_cli.cli.request', request)
+    monkeypatch.setattr('zalando_deploy_cli.cli._scale_deployment', MagicMock())
+    monkeypatch.setattr('zalando_deploy_cli.cli.get_replicas', get_replicas)
+    monkeypatch.setattr('zalando_deploy_cli.cli.kubectl_get', kubectl_get)
+
+    runner = CliRunner()
+    result = runner.invoke(cli, ['delete', 'kubernetes', 'deployments/myapp'])
+    assert result.exception == None
+
+
 def test_delete_deployment(monkeypatch, mock_config):
     def check_output(cmd):
         assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o', 'json', 'replicasets']

@@ -626,7 +626,8 @@ def delete(config, type, resource, execute):
         info('Deleting Kubernetes {} {}..'.format(kind, name))
 
         if kind == 'deployments':
-            delete_deployment(config, name, execute)
+            deployment = kubectl_get(config['kubernetes_namespace'], 'deployments', name)
+            delete_deployment(config, deployment, execute)
             return
         else:
             cluster_id = config['kubernetes_cluster']

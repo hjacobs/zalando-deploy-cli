@@ -1,3 +1,5 @@
+import base64
+
 import json
 import os
 import re
@@ -10,6 +12,8 @@ import urllib.parse
 import errno
 from pathlib import Path
 
+import boto3
+import botocore.exceptions as boto_exceptions
 import click
 import pierone.api
 import pystache
@@ -18,6 +22,7 @@ import stups_cli.config
 import yaml
 import zign.api
 from clickclick import Action, AliasedGroup, error, info, print_table
+
 
 CONTEXT_SETTINGS = dict(help_option_names=['-h', '--help'])
 
@@ -43,6 +48,16 @@ EC2_INSTANCE_MEMORY = {
     'c4.large': 3750,
     'c4.xlarge': 7500
 }
+
+
+def get_aws_account_name(config, account_id: str) -> str:
+    try:
+        # TODO take cluster from config
+        url = "https://cluster-registry.stups.zalan.do/infrastructure-accounts/aws:" + account_id
+        response = request(config, requests.get, url)
+        return response.json()["name"]
+    except:
+        return "unknown-account"
 
 
 def find_latest_docker_image_version(image):
@@ -861,10 +876,35 @@ def execute_change_request(config, change_request_id):
 def encrypt(config):
     '''Encrypt plain text (read from stdin) for deployment configuration'''
     plain_text = sys.stdin.read()
-    api_url = config.get('deploy_api')
-    url = '{}/secrets'.format(api_url)
-    response = request(config, requests.post, url, json={'plaintext': plain_text})
-    print("deployment-secret:{}".format(response.json()['data']))
+
+    try:
+        kms = boto3.client("kms")
+        encrypted = kms.encrypt(KeyId='alias/deployment-secret',
+                                Plaintext=plain_text.encode())
+        encrypted = base64.b64encode(encrypted['CiphertextBlob'])
+        # TODO change autobahn to support 3 sections
+        account_id = boto3.client('sts').get_caller_identity().get('Account')
+        account_name = get_aws_account_name(config, account_id)
+        print("deployment-secret:{account_name}:{encrypted}".format(
+            account_name=account_name,
+            encrypted=encrypted.decode()
+        ))
+    except boto_exceptions.ClientError as exception:
+        error_dict = exception.response["Error"]
+        error_code = error_dict["Code"]
+        if error_code == "NotFoundException":
+            message = "KMS key 'deployment-secret' not found"
+        else:
+            message = "Failed to encrypt with KM"
+        print("{}, falling back to autobahn".format(message),
+              file=sys.stderr)
+        api_url = config.get('deploy_api')
+        url = '{}/secrets'.format(api_url)
+        response = request(config, requests.post, url,
+                           json={'plaintext': plain_text})
+        encrypted = response.json()['data']
+        print("deployment-secret:autobahn-encrypted:{}".format(encrypted))
+
 
 
 def copy_template(template_path: Path, path: Path, variables: dict):

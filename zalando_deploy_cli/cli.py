@@ -872,8 +872,9 @@ def execute_change_request(config, change_request_id):
 
 
 @cli.command('encrypt')
+@click.option('--autobahn-fallback', is_flag=True)
 @click.pass_obj
-def encrypt(config):
+def encrypt(config, autobahn_fallback):
     '''Encrypt plain text (read from stdin) for deployment configuration'''
     plain_text = sys.stdin.read()
 
@@ -882,7 +883,6 @@ def encrypt(config):
         encrypted = kms.encrypt(KeyId='alias/deployment-secret',
                                 Plaintext=plain_text.encode())
         encrypted = base64.b64encode(encrypted['CiphertextBlob'])
-        # TODO change autobahn to support 3 sections
         account_id = boto3.client('sts').get_caller_identity().get('Account')
         account_name = get_aws_account_name(config, account_id)
         print("deployment-secret:{account_name}:{encrypted}".format(
@@ -896,15 +896,18 @@ def encrypt(config):
             message = "KMS key 'deployment-secret' not found"
         else:
             message = "Failed to encrypt with KM"
-        print("{}, falling back to autobahn".format(message),
-              file=sys.stderr)
-        api_url = config.get('deploy_api')
-        url = '{}/secrets'.format(api_url)
-        response = request(config, requests.post, url,
-                           json={'plaintext': plain_text})
-        encrypted = response.json()['data']
-        print("deployment-secret:autobahn-encrypted:{}".format(encrypted))
 
+        if autobahn_fallback:
+            error("{}, falling back to autobahn".format(message))
+            api_url = config.get('deploy_api')
+            url = '{}/secrets'.format(api_url)
+            response = request(config, requests.post, url,
+                               json={'plaintext': plain_text})
+            encrypted = response.json()['data']
+            print("deployment-secret:autobahn-encrypted:{}".format(encrypted))
+        else:
+            error(message)
+            sys.exit(1)
 
 
 def copy_template(template_path: Path, path: Path, variables: dict):

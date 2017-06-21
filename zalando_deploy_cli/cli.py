@@ -894,8 +894,10 @@ def encrypt(config, autobahn_fallback):
         error_code = error_dict["Code"]
         if error_code == "NotFoundException":
             message = "KMS key 'deployment-secret' not found"
+        elif error_code == "ExpiredTokenException":
+            message = "Not logged in to AWS"
         else:
-            message = "Failed to encrypt with KM"
+            message = "Failed to encrypt with KMS"
 
         if autobahn_fallback:
             error("{}, falling back to autobahn".format(message))

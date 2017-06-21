@@ -1,3 +1,4 @@
+import botocore.exceptions
 import json
 import pytest
 import requests
@@ -525,13 +526,55 @@ def test_encrypt(monkeypatch, mock_config):
     })
     monkeypatch.setattr('zalando_deploy_cli.cli.request', encrypt_call)
 
+    monkeypatch.setattr('zalando_deploy_cli.cli.get_aws_account_name',
+                        MagicMock(return_value="test"))
+
+    mock_exit = MagicMock()
+    monkeypatch.setattr('sys.exit',
+                        mock_exit)
+
+    mock_boto = MagicMock()
+    mock_boto.return_value = mock_boto
+    mock_boto.encrypt = MagicMock(return_value={'CiphertextBlob': b'test'})
+    monkeypatch.setattr('boto3.client', mock_boto)
+
     runner = CliRunner()
     result = runner.invoke(cli, ['encrypt'], input='my_secret')
-    assert 'deployment-secret:barFooBAR=' == result.output.strip()
+    assert 'deployment-secret:test:dGVzdA==' == result.output.strip()
 
-    encrypt_call.assert_called_with(mock_config(), requests.post,
-                                    mock_config().get('deploy_api') + '/secrets',
-                                    json={'plaintext': 'my_secret'})
+    mock_boto.encrypt.side_effect = botocore.exceptions.ClientError(
+        operation_name="test",
+        error_response={"Error": {"Code": "test"}}
+    )
+
+    result = runner.invoke(cli, ['encrypt'], input='my_secret')
+    assert 'Failed to encrypt with KMS' == result.output.strip()
+
+    mock_boto.encrypt.side_effect = botocore.exceptions.ClientError(
+        operation_name="test",
+        error_response={"Error": {"Code": "NotFoundException"}}
+    )
+
+    result = runner.invoke(cli, ['encrypt'], input='my_secret')
+    assert "KMS key 'deployment-secret' not found" == result.output.strip()
+
+    mock_boto.encrypt.side_effect = botocore.exceptions.ClientError(
+        operation_name="test",
+        error_response={"Error": {"Code": "ExpiredTokenException"}}
+    )
+
+    result = runner.invoke(cli, ['encrypt'], input='my_secret')
+    assert "Not logged in to AWS" == result.output.strip()
+
+    result = runner.invoke(cli, ['encrypt', '--autobahn-fallback'],
+                           input='my_secret')
+    encrypted = result.output.splitlines()[-1]
+    assert "deployment-secret:autobahn-encrypted:barFooBAR=" == encrypted.strip()
+
+
+    #encrypt_call.assert_called_with(mock_config(), requests.post,
+    #                                mock_config().get('deploy_api') + '/secrets',
+    #                                json={'plaintext': 'my_secret'})
 
 
 def test_resolve_version(monkeypatch):

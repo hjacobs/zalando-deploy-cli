@@ -872,43 +872,42 @@ def execute_change_request(config, change_request_id):
 
 
 @cli.command('encrypt')
-@click.option('--autobahn-fallback', is_flag=True)
+@click.option('--use-kms', is_flag=True)
 @click.pass_obj
-def encrypt(config, autobahn_fallback):
+def encrypt(config, use_kms):
     '''Encrypt plain text (read from stdin) for deployment configuration'''
     plain_text = sys.stdin.read()
 
-    try:
-        kms = boto3.client("kms")
-        encrypted = kms.encrypt(KeyId='alias/deployment-secret',
-                                Plaintext=plain_text.encode())
-        encrypted = base64.b64encode(encrypted['CiphertextBlob'])
-        account_name = get_aws_account_name()
-        print("deployment-secret:{account_name}:{encrypted}".format(
-            account_name=account_name,
-            encrypted=encrypted.decode()
-        ))
-    except boto_exceptions.ClientError as exception:
-        error_dict = exception.response["Error"]
-        error_code = error_dict["Code"]
-        if error_code == "NotFoundException":
-            message = "KMS key 'deployment-secret' not found"
-        elif error_code == "ExpiredTokenException":
-            message = "Not logged in to AWS"
-        else:
-            message = "Failed to encrypt with KMS"
-
-        if autobahn_fallback:
-            error("{}, falling back to autobahn".format(message))
-            api_url = config.get('deploy_api')
-            url = '{}/secrets'.format(api_url)
-            response = request(config, requests.post, url,
-                               json={'plaintext': plain_text})
-            encrypted = response.json()['data']
-            print("deployment-secret:autobahn-encrypted:{}".format(encrypted))
-        else:
+    if use_kms:
+        try:
+            kms = boto3.client("kms")
+            encrypted = kms.encrypt(KeyId='alias/deployment-secret',
+                                    Plaintext=plain_text.encode())
+            encrypted = base64.b64encode(encrypted['CiphertextBlob'])
+            account_name = get_aws_account_name()
+            print("deployment-secret:{account_name}:{encrypted}".format(
+                account_name=account_name,
+                encrypted=encrypted.decode()
+            ))
+        except boto_exceptions.ClientError as exception:
+            error_dict = exception.response["Error"]
+            error_code = error_dict["Code"]
+            if error_code == "NotFoundException":
+                message = "KMS key 'deployment-secret' not found"
+            elif error_code == "ExpiredTokenException":
+                message = "Not logged in to AWS"
+            else:
+                message = "Failed to encrypt with KMS"
             error(message)
             sys.exit(1)
+    else:
+        api_url = config.get('deploy_api')
+        url = '{}/secrets'.format(api_url)
+        response = request(config, requests.post, url,
+                           json={'plaintext': plain_text})
+        encrypted = response.json()['data']
+        print("deployment-secret:autobahn-encrypted:{}".format(encrypted))
+
 
 
 def copy_template(template_path: Path, path: Path, variables: dict):

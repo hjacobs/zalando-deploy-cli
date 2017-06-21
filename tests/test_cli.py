@@ -552,7 +552,7 @@ def test_encrypt(monkeypatch, mock_config):
     monkeypatch.setattr('boto3.client', mock_boto)
 
     runner = CliRunner()
-    result = runner.invoke(cli, ['encrypt'], input='my_secret')
+    result = runner.invoke(cli, ['encrypt', '--use-kms'], input='my_secret')
     assert 'deployment-secret:test:dGVzdA==' == result.output.strip()
 
     mock_boto.encrypt.side_effect = botocore.exceptions.ClientError(
@@ -560,7 +560,7 @@ def test_encrypt(monkeypatch, mock_config):
         error_response={"Error": {"Code": "test"}}
     )
 
-    result = runner.invoke(cli, ['encrypt'], input='my_secret')
+    result = runner.invoke(cli, ['encrypt', '--use-kms'], input='my_secret')
     assert 'Failed to encrypt with KMS' == result.output.strip()
 
     mock_boto.encrypt.side_effect = botocore.exceptions.ClientError(
@@ -568,7 +568,7 @@ def test_encrypt(monkeypatch, mock_config):
         error_response={"Error": {"Code": "NotFoundException"}}
     )
 
-    result = runner.invoke(cli, ['encrypt'], input='my_secret')
+    result = runner.invoke(cli, ['encrypt', '--use-kms'], input='my_secret')
     assert "KMS key 'deployment-secret' not found" == result.output.strip()
 
     mock_boto.encrypt.side_effect = botocore.exceptions.ClientError(
@@ -576,13 +576,12 @@ def test_encrypt(monkeypatch, mock_config):
         error_response={"Error": {"Code": "ExpiredTokenException"}}
     )
 
-    result = runner.invoke(cli, ['encrypt'], input='my_secret')
+    result = runner.invoke(cli, ['encrypt', '--use-kms'], input='my_secret')
     assert "Not logged in to AWS" == result.output.strip()
 
-    result = runner.invoke(cli, ['encrypt', '--autobahn-fallback'],
-                           input='my_secret')
-    encrypted = result.output.splitlines()[-1]
-    assert "deployment-secret:autobahn-encrypted:barFooBAR=" == encrypted.strip()
+    result = runner.invoke(cli, ['encrypt'], input='my_secret')
+    encrypted = result.output.strip()
+    assert "deployment-secret:autobahn-encrypted:barFooBAR=" == encrypted
 
 
     encrypt_call.assert_called_with(mock_config(), requests.post,

@@ -50,12 +50,12 @@ EC2_INSTANCE_MEMORY = {
 }
 
 
-def get_aws_account_name(config, account_id: str) -> str:
+def get_aws_account_name() -> str:
+
     try:
-        # TODO take cluster from config
-        url = "https://cluster-registry.stups.zalan.do/infrastructure-accounts/aws:" + account_id
-        response = request(config, requests.get, url)
-        return response.json()["name"]
+        zaws_config = stups_cli.config.load_config("zalando-aws-cli")
+        current_account = zaws_config["last_update"]["account_name"]
+        return current_account
     except:
         return "unknown-account"
 
@@ -883,8 +883,7 @@ def encrypt(config, autobahn_fallback):
         encrypted = kms.encrypt(KeyId='alias/deployment-secret',
                                 Plaintext=plain_text.encode())
         encrypted = base64.b64encode(encrypted['CiphertextBlob'])
-        account_id = boto3.client('sts').get_caller_identity().get('Account')
-        account_name = get_aws_account_name(config, account_id)
+        account_name = get_aws_account_name()
         print("deployment-secret:{account_name}:{encrypted}".format(
             account_name=account_name,
             encrypted=encrypted.decode()

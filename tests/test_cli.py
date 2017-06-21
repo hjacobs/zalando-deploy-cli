@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, ANY
 
 from click.testing import CliRunner
 from zalando_deploy_cli.cli import (cli,
+                                    get_aws_account_name,
                                     get_replicas,
                                     get_owned_replicasets,
                                     delete_deployment,
@@ -518,6 +519,18 @@ def test_get_current_replicas(monkeypatch, mock_config):
     assert '3' == result.output.strip()
 
 
+def test_get_aws_account_name(monkeypatch):
+    zaws_config = {
+        "last_update": {'account_name': 'test'}
+    }
+    load_config = MagicMock(return_value=zaws_config)
+    monkeypatch.setattr('stups_cli.config.load_config', load_config)
+    assert get_aws_account_name() == 'test'
+
+    load_config.return_value = {}
+    assert get_aws_account_name() == "unknown-account"
+
+
 def test_encrypt(monkeypatch, mock_config):
     encrypt_call = MagicMock()
     encrypt_call.return_value = encrypt_call
@@ -572,9 +585,9 @@ def test_encrypt(monkeypatch, mock_config):
     assert "deployment-secret:autobahn-encrypted:barFooBAR=" == encrypted.strip()
 
 
-    #encrypt_call.assert_called_with(mock_config(), requests.post,
-    #                                mock_config().get('deploy_api') + '/secrets',
-    #                                json={'plaintext': 'my_secret'})
+    encrypt_call.assert_called_with(mock_config(), requests.post,
+                                    mock_config().get('deploy_api') + '/secrets',
+                                    json={'plaintext': 'my_secret'})
 
 
 def test_resolve_version(monkeypatch):

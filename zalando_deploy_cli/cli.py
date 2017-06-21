@@ -909,7 +909,6 @@ def encrypt(config, use_kms):
         print("deployment-secret:autobahn-encrypted:{}".format(encrypted))
 
 
-
 def copy_template(template_path: Path, path: Path, variables: dict):
     for d in template_path.iterdir():
         target_path = path / d.relative_to(template_path)

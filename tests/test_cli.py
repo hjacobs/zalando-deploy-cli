@@ -1,3 +1,4 @@
+import botocore.exceptions
 import json
 import pytest
 import requests
@@ -7,6 +8,7 @@ from unittest.mock import MagicMock, ANY
 
 from click.testing import CliRunner
 from zalando_deploy_cli.cli import (cli,
+                                    get_aws_account_name,
                                     get_replicas,
                                     get_owned_replicasets,
                                     delete_deployment,
@@ -517,6 +519,18 @@ def test_get_current_replicas(monkeypatch, mock_config):
     assert '3' == result.output.strip()
 
 
+def test_get_aws_account_name(monkeypatch):
+    zaws_config = {
+        "last_update": {'account_name': 'test'}
+    }
+    load_config = MagicMock(return_value=zaws_config)
+    monkeypatch.setattr('stups_cli.config.load_config', load_config)
+    assert get_aws_account_name() == 'test'
+
+    load_config.return_value = {}
+    assert get_aws_account_name() == "unknown-account"
+
+
 def test_encrypt(monkeypatch, mock_config):
     encrypt_call = MagicMock()
     encrypt_call.return_value = encrypt_call
@@ -525,9 +539,50 @@ def test_encrypt(monkeypatch, mock_config):
     })
     monkeypatch.setattr('zalando_deploy_cli.cli.request', encrypt_call)
 
+    monkeypatch.setattr('zalando_deploy_cli.cli.get_aws_account_name',
+                        MagicMock(return_value="test"))
+
+    mock_exit = MagicMock()
+    monkeypatch.setattr('sys.exit',
+                        mock_exit)
+
+    mock_boto = MagicMock()
+    mock_boto.return_value = mock_boto
+    mock_boto.encrypt = MagicMock(return_value={'CiphertextBlob': b'test'})
+    monkeypatch.setattr('boto3.client', mock_boto)
+
     runner = CliRunner()
+    result = runner.invoke(cli, ['encrypt', '--use-kms'], input='my_secret')
+    assert 'deployment-secret:test:dGVzdA==' == result.output.strip()
+
+    mock_boto.encrypt.side_effect = botocore.exceptions.ClientError(
+        operation_name="test",
+        error_response={"Error": {"Code": "test"}}
+    )
+
+    result = runner.invoke(cli, ['encrypt', '--use-kms'], input='my_secret')
+    assert 'Failed to encrypt with KMS' == result.output.strip()
+
+    mock_boto.encrypt.side_effect = botocore.exceptions.ClientError(
+        operation_name="test",
+        error_response={"Error": {"Code": "NotFoundException"}}
+    )
+
+    result = runner.invoke(cli, ['encrypt', '--use-kms'], input='my_secret')
+    assert "KMS key 'deployment-secret' not found" == result.output.strip()
+
+    mock_boto.encrypt.side_effect = botocore.exceptions.ClientError(
+        operation_name="test",
+        error_response={"Error": {"Code": "ExpiredTokenException"}}
+    )
+
+    result = runner.invoke(cli, ['encrypt', '--use-kms'], input='my_secret')
+    assert "Not logged in to AWS" == result.output.strip()
+
     result = runner.invoke(cli, ['encrypt'], input='my_secret')
-    assert 'deployment-secret:barFooBAR=' == result.output.strip()
+    encrypted = result.output.strip()
+    assert "deployment-secret:autobahn-encrypted:barFooBAR=" == encrypted
+
 
     encrypt_call.assert_called_with(mock_config(), requests.post,
                                     mock_config().get('deploy_api') + '/secrets',

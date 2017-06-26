@@ -22,7 +22,7 @@ from zalando_deploy_cli.cli import (cli,
 def mock_config(monkeypatch):
     config = {
         'kubernetes_api_server': 'https://example.org',
-        'kubernetes_cluster': 'mycluster',
+        'kubernetes_cluster': 'aws:1234:region:mycluster',
         'kubernetes_namespace': 'mynamespace',
         'deploy_api': 'https://deploy.example.org'
     }
@@ -145,7 +145,7 @@ def test_switch_deployment_call_once(monkeypatch, mock_config):
 
     request.called_once_with(requests.patch,
                              ('https://example.org/kubernetes-clusters/'
-                              'mycluster/namespaces/mynamespace/resources'),
+                              'aws:1234:region:mycluster/namespaces/mynamespace/resources'),
                              json={'resources_update': ANY})
     assert result.exit_code == 0
 
@@ -538,14 +538,7 @@ def test_encrypt(monkeypatch, mock_config):
         'data': 'barFooBAR='
     })
 
-    registry_call = MagicMock()
-    registry_call.return_value = registry_call
-    registry_call.json = MagicMock(return_value={
-        'local_id': 'kube-1',
-    })
-
     monkeypatch.setattr('zalando_deploy_cli.cli.request', encrypt_call)
-    monkeypatch.setattr('zalando_deploy_cli.cli.request_url', registry_call)
 
     monkeypatch.setattr('zalando_deploy_cli.cli.get_aws_account_name',
                         MagicMock(return_value="test"))
@@ -577,7 +570,7 @@ def test_encrypt(monkeypatch, mock_config):
     )
 
     result = runner.invoke(cli, ['encrypt', '--use-kms'], input='my_secret')
-    assert "KMS key 'alias/kube-1-deployment-secret' not found" == result.output.strip()
+    assert "KMS key 'alias/mycluster-deployment-secret' not found" == result.output.strip()
 
     mock_boto.encrypt.side_effect = botocore.exceptions.ClientError(
         operation_name="test",

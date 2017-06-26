@@ -87,16 +87,13 @@ release_argument = click.argument('release', callback=validate_pattern(VERSION_P
 
 
 def request(config: dict, method, path: str, headers=None, exit_on_error=True, **kwargs):
-    return request_url(config, config.get('deploy_api'), method, path, headers, exit_on_error, **kwargs)
-
-
-def request_url(config: dict, api_url, method, path: str, headers=None, exit_on_error=True, **kwargs):
     token = zign.api.get_token('uid', ['uid'])
     if not headers:
         headers = {}
     headers['Authorization'] = 'Bearer {}'.format(token)
     if config.get('user'):
         headers['X-On-Behalf-Of'] = config['user']
+    api_url = config.get('deploy_api')
     url = urllib.parse.urljoin(api_url, path)
     response = method(url, headers=headers, timeout=DEFAULT_HTTP_TIMEOUT, **kwargs)
     if exit_on_error:
@@ -192,7 +189,6 @@ def cli(ctx):
 
 @cli.command()
 @click.option('--deploy-api')
-@click.option('--registry-api')
 @click.option('--aws-account')
 @click.option('--aws-region')
 @click.option('--kubernetes-api-server')
@@ -885,12 +881,8 @@ def encrypt(config, use_kms, kms_keyid):
 
     if use_kms:
         if not kms_keyid:
-            registry = config.get('registry_api')
             cluster = config.get('kubernetes_cluster')
-            url = '{}/kubernetes-clusters/{}'.format(registry, cluster)
-            response = request_url(config, registry, requests.get, url)
-            response_body = response.json()
-            local_id = response_body["local_id"]
+            local_id = cluster.rsplit(':')[-1]
             kms_keyid = 'alias/{}-deployment-secret'.format(local_id)
         try:
             kms = boto3.client("kms")

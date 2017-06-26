@@ -71,7 +71,6 @@ All commands interacting with the "Autobahn" deployment API either need the ``--
     $ sudo pip3 install -U zalando-deploy-cli
     $ zdeploy configure \
         --deploy-api=https://deploy-api.example.org \
-        --registry-api=https://cluster-registry.example.org \
         --aws-account=aws:7.. \
         --aws-region=eu-central-1 \
         --kubernetes-cluster=aws:7..:kube-1

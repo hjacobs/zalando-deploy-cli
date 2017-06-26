@@ -873,15 +873,20 @@ def execute_change_request(config, change_request_id):
 
 @cli.command('encrypt')
 @click.option('--use-kms', is_flag=True)
+@click.option('--kms-keyid')
 @click.pass_obj
-def encrypt(config, use_kms):
+def encrypt(config, use_kms, kms_keyid):
     '''Encrypt plain text (read from stdin) for deployment configuration'''
     plain_text = sys.stdin.read()
 
     if use_kms:
+        if not kms_keyid:
+            cluster = config.get('kubernetes_cluster')
+            local_id = cluster.rsplit(':')[-1]
+            kms_keyid = 'alias/{}-deployment-secret'.format(local_id)
         try:
             kms = boto3.client("kms")
-            encrypted = kms.encrypt(KeyId='alias/deployment-secret',
+            encrypted = kms.encrypt(KeyId=kms_keyid,
                                     Plaintext=plain_text.encode())
             encrypted = base64.b64encode(encrypted['CiphertextBlob'])
             account_name = get_aws_account_name()
@@ -893,7 +898,7 @@ def encrypt(config, use_kms):
             error_dict = exception.response["Error"]
             error_code = error_dict["Code"]
             if error_code == "NotFoundException":
-                message = "KMS key 'deployment-secret' not found"
+                message = "KMS key '{}' not found".format(kms_keyid)
             elif error_code == "ExpiredTokenException":
                 message = "Not logged in to AWS"
             else:

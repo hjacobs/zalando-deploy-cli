@@ -537,7 +537,15 @@ def test_encrypt(monkeypatch, mock_config):
     encrypt_call.json = MagicMock(return_value={
         'data': 'barFooBAR='
     })
+
+    registry_call = MagicMock()
+    registry_call.return_value = registry_call
+    registry_call.json = MagicMock(return_value={
+        'local_id': 'kube-1',
+    })
+
     monkeypatch.setattr('zalando_deploy_cli.cli.request', encrypt_call)
+    monkeypatch.setattr('zalando_deploy_cli.cli.request_url', registry_call)
 
     monkeypatch.setattr('zalando_deploy_cli.cli.get_aws_account_name',
                         MagicMock(return_value="test"))
@@ -569,7 +577,7 @@ def test_encrypt(monkeypatch, mock_config):
     )
 
     result = runner.invoke(cli, ['encrypt', '--use-kms'], input='my_secret')
-    assert "KMS key 'deployment-secret' not found" == result.output.strip()
+    assert "KMS key 'alias/kube-1-deployment-secret' not found" == result.output.strip()
 
     mock_boto.encrypt.side_effect = botocore.exceptions.ClientError(
         operation_name="test",

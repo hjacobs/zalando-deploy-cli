@@ -570,7 +570,7 @@ def test_encrypt(monkeypatch, mock_config):
     )
 
     result = runner.invoke(cli, ['encrypt', '--use-kms'], input='my_secret')
-    assert "KMS key 'alias/mycluster-deployment-secret' not found" == result.output.strip()
+    assert "KMS key 'alias/mycluster-deployment-secret' not found. Please check your AWS region." == result.output.strip()
 
     mock_boto.encrypt.side_effect = botocore.exceptions.ClientError(
         operation_name="test",

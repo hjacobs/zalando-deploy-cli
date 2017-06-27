@@ -885,7 +885,7 @@ def encrypt(config, use_kms, kms_keyid):
             local_id = cluster.rsplit(':')[-1]
             kms_keyid = 'alias/{}-deployment-secret'.format(local_id)
         try:
-            kms = boto3.client("kms")
+            kms = boto3.client("kms", "eu-central-1")
             encrypted = kms.encrypt(KeyId=kms_keyid,
                                     Plaintext=plain_text.encode())
             encrypted = base64.b64encode(encrypted['CiphertextBlob'])

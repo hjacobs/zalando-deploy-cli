@@ -874,8 +874,9 @@ def execute_change_request(config, change_request_id):
 @cli.command('encrypt')
 @click.option('--use-kms', is_flag=True)
 @click.option('--kms-keyid')
+@click.option('--region')
 @click.pass_obj
-def encrypt(config, use_kms, kms_keyid):
+def encrypt(config, use_kms, kms_keyid, region):
     '''Encrypt plain text (read from stdin) for deployment configuration'''
     plain_text = sys.stdin.read()
 
@@ -885,7 +886,7 @@ def encrypt(config, use_kms, kms_keyid):
             local_id = cluster.rsplit(':')[-1]
             kms_keyid = 'alias/{}-deployment-secret'.format(local_id)
         try:
-            kms = boto3.client("kms", "eu-central-1")
+            kms = boto3.client("kms", region)
             encrypted = kms.encrypt(KeyId=kms_keyid,
                                     Plaintext=plain_text.encode())
             encrypted = base64.b64encode(encrypted['CiphertextBlob'])
@@ -898,7 +899,8 @@ def encrypt(config, use_kms, kms_keyid):
             error_dict = exception.response["Error"]
             error_code = error_dict["Code"]
             if error_code == "NotFoundException":
-                message = "KMS key '{}' not found".format(kms_keyid)
+                message = ("KMS key '{}' not found. "
+                           "Please check your AWS region.".format(kms_keyid))
             elif error_code == "ExpiredTokenException":
                 message = "Not logged in to AWS"
             else:

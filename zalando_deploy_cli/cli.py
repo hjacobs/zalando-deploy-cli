@@ -50,7 +50,6 @@ EC2_INSTANCE_MEMORY = {
 }
 
 
-
 def get_cluster_registry_url():
     try:
         zkubectl_config = stups_cli.config.load_config("zalando-kubectl")

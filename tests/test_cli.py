@@ -1,14 +1,16 @@
-import botocore.exceptions
 import json
+from unittest.mock import MagicMock, ANY
+
+import botocore.exceptions
 import pytest
 import requests
 import yaml
-import zalando_deploy_cli.cli
-from unittest.mock import MagicMock, ANY
-
 from click.testing import CliRunner
+
+import zalando_deploy_cli
 from zalando_deploy_cli.cli import (cli,
                                     get_aws_account_name,
+                                    get_cluster_registry_url,
                                     get_replicas,
                                     get_owned_replicasets,
                                     delete_deployment,
@@ -37,7 +39,8 @@ def test_create_deployment_invalid_argument():
         with open('template.yaml', 'w') as fd:
             yaml.dump({}, fd)
 
-        result = runner.invoke(cli, ['create-deployment', 'template.yaml', 'my-app2', 'v2-X', 'r42'])
+        result = runner.invoke(cli, ['create-deployment', 'template.yaml',
+                                     'my-app2', 'v2-X', 'r42'])
     assert 'Error: Invalid value for "version": does not match regular expression pattern "^[a-z0-9][a-z0-9.-]*$' in result.output
 
 
@@ -51,19 +54,25 @@ def test_create_deployment_success(monkeypatch):
         with open('template.yaml', 'w') as fd:
             yaml.dump({}, fd)
 
-        result = runner.invoke(cli, ['create-deployment', 'template.yaml', 'my-app', 'v1', 'r1', 'replicas=3'])
+        result = runner.invoke(cli,
+                               ['create-deployment', 'template.yaml', 'my-app',
+                                'v1', 'r1', 'replicas=3'])
     assert 'my-cr-id' == result.output.strip()
 
 
 def test_apply(monkeypatch, mock_config):
     def check_output(cmd):
-        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o', 'json', 'services',
+        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o',
+                       'json', 'services',
                        '-l', 'application=myapp']
         output = {
             'items': [
-                {'metadata': {'name': 'myapp-r40', 'labels': {'application': 'myapp'}}},
-                {'metadata': {'name': 'myapp-r41', 'labels': {'application': 'myapp'}}},
-                {'metadata': {'name': 'myapp-r42', 'labels': {'application': 'myapp'}}},
+                {'metadata': {'name': 'myapp-r40',
+                              'labels': {'application': 'myapp'}}},
+                {'metadata': {'name': 'myapp-r41',
+                              'labels': {'application': 'myapp'}}},
+                {'metadata': {'name': 'myapp-r42',
+                              'labels': {'application': 'myapp'}}},
             ]
         }
         return json.dumps(output).encode('utf-8')
@@ -77,7 +86,8 @@ def test_apply(monkeypatch, mock_config):
 
     monkeypatch.setattr('zalando_deploy_cli.cli.kubectl_login', MagicMock())
     monkeypatch.setattr('zalando_deploy_cli.cli.request', request)
-    monkeypatch.setattr('zalando_deploy_cli.cli._render_template', _render_template)
+    monkeypatch.setattr('zalando_deploy_cli.cli._render_template',
+                        _render_template)
     monkeypatch.setattr('subprocess.check_output', check_output)
 
     runner = CliRunner()
@@ -85,8 +95,9 @@ def test_apply(monkeypatch, mock_config):
         with open('manifest.yaml', 'w') as f:
             f.write("apiVersion: v1\nkind: Pod")
 
-        result = runner.invoke(cli, ['apply', 'manifest.yaml', 'replicas=1', 'application=myapp',
-                                'release=2', 'version=v1.0'])
+        result = runner.invoke(cli, ['apply', 'manifest.yaml', 'replicas=1',
+                                     'application=myapp',
+                                     'release=2', 'version=v1.0'])
         assert ('Applying Kubernetes manifest manifest.yaml..\n'
                 'my-change-request-id' == result.output.strip())
         assert result.exception == None
@@ -94,7 +105,8 @@ def test_apply(monkeypatch, mock_config):
 
 def test_switch_deployment(monkeypatch, mock_config):
     def check_output(cmd):
-        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o', 'json', 'deployments',
+        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o',
+                       'json', 'deployments',
                        '-l', 'application=myapp']
         output = {
             'items': [
@@ -113,7 +125,8 @@ def test_switch_deployment(monkeypatch, mock_config):
     monkeypatch.setattr('subprocess.check_output', check_output)
 
     runner = CliRunner()
-    result = runner.invoke(cli, ['switch-deployment', 'myapp', 'v2', 'r42', '1/2'])
+    result = runner.invoke(cli,
+                           ['switch-deployment', 'myapp', 'v2', 'r42', '1/2'])
     assert ('Scaling deployment myapp-v3-r40 to 1 replicas..\n'
             'Scaling deployment myapp-v2-r42 to 1 replicas..\n'
             'Scaling deployment myapp-v2-r41 to 0 replicas..\n'
@@ -122,7 +135,8 @@ def test_switch_deployment(monkeypatch, mock_config):
 
 def test_switch_deployment_call_once(monkeypatch, mock_config):
     def check_output(cmd):
-        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o', 'json', 'deployments',
+        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o',
+                       'json', 'deployments',
                        '-l', 'application=myapp']
         output = {
             'items': [
@@ -141,7 +155,8 @@ def test_switch_deployment_call_once(monkeypatch, mock_config):
     monkeypatch.setattr('subprocess.check_output', check_output)
 
     runner = CliRunner()
-    result = runner.invoke(cli, ['switch-deployment', 'myapp', 'v2', 'r42', '1/2'])
+    result = runner.invoke(cli,
+                           ['switch-deployment', 'myapp', 'v2', 'r42', '1/2'])
 
     request.called_once_with(requests.patch,
                              ('https://example.org/kubernetes-clusters/'
@@ -152,7 +167,8 @@ def test_switch_deployment_call_once(monkeypatch, mock_config):
 
 def test_switch_deployment_target_does_not_exist(monkeypatch, mock_config):
     def check_output(cmd):
-        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o', 'json', 'deployments',
+        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o',
+                       'json', 'deployments',
                        '-l', 'application=myapp']
         output = {
             'items': [
@@ -171,7 +187,8 @@ def test_switch_deployment_target_does_not_exist(monkeypatch, mock_config):
     monkeypatch.setattr('subprocess.check_output', check_output)
 
     runner = CliRunner()
-    result = runner.invoke(cli, ['switch-deployment', 'myapp', 'v2', 'r42', '1/2'])
+    result = runner.invoke(cli,
+                           ['switch-deployment', 'myapp', 'v2', 'r42', '1/2'])
     assert 'Deployment myapp-v2-r42 does not exist!' in result.output
     assert result.exit_code == 1
 
@@ -184,14 +201,16 @@ def test_scale_deployment(monkeypatch, mock_config):
     monkeypatch.setattr('zalando_deploy_cli.cli.request', request)
 
     runner = CliRunner()
-    result = runner.invoke(cli, ['scale-deployment', 'myapp', 'v2', 'r42', '1'])
+    result = runner.invoke(cli,
+                           ['scale-deployment', 'myapp', 'v2', 'r42', '1'])
     assert ('Scaling deployment myapp-v2-r42 to 1 replicas..\n'
             'my-change-request-id' == result.output.strip())
 
 
 def test_traffic(monkeypatch, mock_config):
     def check_output(cmd):
-        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o', 'json', 'ingresses',
+        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o',
+                       'json', 'ingresses',
                        'myapp']
         output = {'metadata': {'name': 'myapp-v2-r40'}}
 
@@ -205,7 +224,8 @@ def test_traffic(monkeypatch, mock_config):
 
     monkeypatch.setattr('zalando_deploy_cli.cli.kubectl_login', MagicMock())
     monkeypatch.setattr('zalando_deploy_cli.cli.request', request)
-    monkeypatch.setattr('zalando_deploy_cli.cli.calculate_backend_weights', calculate_backend_weights)
+    monkeypatch.setattr('zalando_deploy_cli.cli.calculate_backend_weights',
+                        calculate_backend_weights)
     monkeypatch.setattr('subprocess.check_output', check_output)
 
     runner = CliRunner()
@@ -216,135 +236,136 @@ def test_traffic(monkeypatch, mock_config):
 
 def test_calculate_backend_weights(monkeypatch):
     test_cases = [
-            {
-                'percent': 100,
-                'backend': 'a',
-                'ingress': {
-                    'spec': {
-                        'rules': [
-                            {
-                                'http': {
-                                    'paths': [
-                                        {'backend': {'serviceName': 'a'}}
-                                    ]
-                                }
+        {
+            'percent': 100,
+            'backend': 'a',
+            'ingress': {
+                'spec': {
+                    'rules': [
+                        {
+                            'http': {
+                                'paths': [
+                                    {'backend': {'serviceName': 'a'}}
+                                ]
                             }
-                        ]
-                    }
-                },
-                'expected': {'a': 100}
+                        }
+                    ]
+                }
             },
-            {
-                'percent': 30,
-                'backend': 'a',
-                'ingress': {
-                    'spec': {
-                        'rules': [
-                            {
-                                'http': {
-                                    'paths': [
-                                        {'backend': {'serviceName': 'a'}},
-                                        {'backend': {'serviceName': 'b'}},
-                                    ]
-                                }
+            'expected': {'a': 100}
+        },
+        {
+            'percent': 30,
+            'backend': 'a',
+            'ingress': {
+                'spec': {
+                    'rules': [
+                        {
+                            'http': {
+                                'paths': [
+                                    {'backend': {'serviceName': 'a'}},
+                                    {'backend': {'serviceName': 'b'}},
+                                ]
                             }
-                        ]
-                    }
-                },
-                'expected': {'a': 30, 'b': 70}
+                        }
+                    ]
+                }
             },
+            'expected': {'a': 30, 'b': 70}
+        },
     ]
 
     for tc in test_cases:
-        weights = calculate_backend_weights(tc['ingress'], tc['backend'], tc['percent'])
+        weights = calculate_backend_weights(tc['ingress'], tc['backend'],
+                                            tc['percent'])
         assert weights == tc['expected']
 
 
 def test_get_ingress_backends(monkeypatch):
     test_cases = [
-            {
-                'ingress': {
-                    'metadata': {
-                        'annotations': {
-                            INGRESS_BACKEND_WEIGHT_ANNOTATION_KEY: '{"a":30}',
-                        },
+        {
+            'ingress': {
+                'metadata': {
+                    'annotations': {
+                        INGRESS_BACKEND_WEIGHT_ANNOTATION_KEY: '{"a":30}',
                     },
-                    'spec': {
-                        'rules': [
-                            {
-                                'http': {
-                                    'paths': [
-                                        {'backend': {'serviceName': 'a'}}
-                                    ]
-                                }
-                            }
-                        ]
-                    }
                 },
-                'expected': {'a': 100}
+                'spec': {
+                    'rules': [
+                        {
+                            'http': {
+                                'paths': [
+                                    {'backend': {'serviceName': 'a'}}
+                                ]
+                            }
+                        }
+                    ]
+                }
             },
-            {
-                'ingress': {
-                    'metadata': {
-                        'annotations': {
-                            INGRESS_BACKEND_WEIGHT_ANNOTATION_KEY: '{"a":30}',
-                        },
+            'expected': {'a': 100}
+        },
+        {
+            'ingress': {
+                'metadata': {
+                    'annotations': {
+                        INGRESS_BACKEND_WEIGHT_ANNOTATION_KEY: '{"a":30}',
                     },
-                    'spec': {
-                        'rules': [
-                            {
-                                'http': {
-                                    'paths': [
-                                        {'backend': {'serviceName': 'a'}},
-                                        {'backend': {'serviceName': 'b'}}
-                                    ]
-                                }
-                            }
-                        ]
-                    }
                 },
-                'expected': {'a': 100, 'b': 0}
+                'spec': {
+                    'rules': [
+                        {
+                            'http': {
+                                'paths': [
+                                    {'backend': {'serviceName': 'a'}},
+                                    {'backend': {'serviceName': 'b'}}
+                                ]
+                            }
+                        }
+                    ]
+                }
             },
-            {
-                'ingress': {
-                    'metadata': {
-                        'annotations': {
-                            INGRESS_BACKEND_WEIGHT_ANNOTATION_KEY: '{"a":30, "b": 70}',
-                        },
+            'expected': {'a': 100, 'b': 0}
+        },
+        {
+            'ingress': {
+                'metadata': {
+                    'annotations': {
+                        INGRESS_BACKEND_WEIGHT_ANNOTATION_KEY: '{"a":30, "b": 70}',
                     },
-                    'spec': {
-                        'rules': [
-                            {
-                                'http': {
-                                    'paths': [
-                                        {'backend': {'serviceName': 'a'}},
-                                        {'backend': {'serviceName': 'b'}},
-                                    ]
-                                }
-                            }
-                        ]
-                    }
                 },
-                'expected': {'a': 30, 'b': 70}
-            },
-            {
-                'ingress': {
-                    'metadata': {},
-                    'spec': {
-                        'rules': [
-                            {
-                                'http': {
-                                    'paths': [
-                                        {'backend': {'serviceName': 'a'}},
-                                        {'backend': {'serviceName': 'b'}},
-                                    ]
-                                }
+                'spec': {
+                    'rules': [
+                        {
+                            'http': {
+                                'paths': [
+                                    {'backend': {'serviceName': 'a'}},
+                                    {'backend': {'serviceName': 'b'}},
+                                ]
                             }
-                        ]
-                    }
-                },
-                'expected': {'a': 50, 'b': 50}
+                        }
+                    ]
+                }
             },
+            'expected': {'a': 30, 'b': 70}
+        },
+        {
+            'ingress': {
+                'metadata': {},
+                'spec': {
+                    'rules': [
+                        {
+                            'http': {
+                                'paths': [
+                                    {'backend': {'serviceName': 'a'}},
+                                    {'backend': {'serviceName': 'b'}},
+                                ]
+                            }
+                        }
+                    ]
+                }
+            },
+            'expected': {'a': 50, 'b': 50}
+        },
     ]
 
     for tc in test_cases:
@@ -354,7 +375,8 @@ def test_get_ingress_backends(monkeypatch):
 
 def test_delete_old_deployments(monkeypatch, mock_config):
     def check_output(cmd):
-        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o', 'json', 'deployments', '-l',
+        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o',
+                       'json', 'deployments', '-l',
                        'application=myapp']
         output = {
             'items': [
@@ -370,7 +392,8 @@ def test_delete_old_deployments(monkeypatch, mock_config):
 
     monkeypatch.setattr('zalando_deploy_cli.cli.kubectl_login', MagicMock())
     monkeypatch.setattr('zalando_deploy_cli.cli.request', request)
-    monkeypatch.setattr('zalando_deploy_cli.cli.delete_deployment', MagicMock())
+    monkeypatch.setattr('zalando_deploy_cli.cli.delete_deployment',
+                        MagicMock())
     monkeypatch.setattr('subprocess.check_output', check_output)
 
     runner = CliRunner()
@@ -379,7 +402,8 @@ def test_delete_old_deployments(monkeypatch, mock_config):
 
 def test_get_replicas(monkeypatch, mock_config):
     def check_output(cmd):
-        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o', 'json', 'deployments', 'mydeployment']
+        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o',
+                       'json', 'deployments', 'mydeployment']
         output = {'status': {'replicas': 0}}
         return json.dumps(output).encode('utf-8')
 
@@ -395,7 +419,8 @@ def test_get_owned_replicasets(monkeypatch, mock_config):
         {'metadata': {}},
     ]
 
-    assert get_owned_replicasets(deployment, replicasets) == [{'metadata': {'ownerReferences': [{'uid': 'id'}]}}]
+    assert get_owned_replicasets(deployment, replicasets) == [
+        {'metadata': {'ownerReferences': [{'uid': 'id'}]}}]
 
 
 def test_delete(monkeypatch, mock_config):
@@ -427,7 +452,8 @@ def test_delete(monkeypatch, mock_config):
     request.return_value.json.return_value = {'id': 'my-change-request-id'}
 
     monkeypatch.setattr('zalando_deploy_cli.cli.request', request)
-    monkeypatch.setattr('zalando_deploy_cli.cli._scale_deployment', MagicMock())
+    monkeypatch.setattr('zalando_deploy_cli.cli._scale_deployment',
+                        MagicMock())
     monkeypatch.setattr('zalando_deploy_cli.cli.get_replicas', get_replicas)
     monkeypatch.setattr('zalando_deploy_cli.cli.kubectl_get', kubectl_get)
 
@@ -438,7 +464,8 @@ def test_delete(monkeypatch, mock_config):
 
 def test_delete_deployment(monkeypatch, mock_config):
     def check_output(cmd):
-        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o', 'json', 'replicasets']
+        assert cmd == ['zkubectl', 'get', '--namespace=mynamespace', '-o',
+                       'json', 'replicasets']
         output = {
             'items': [
                 {'metadata': {
@@ -465,7 +492,8 @@ def test_delete_deployment(monkeypatch, mock_config):
     request.return_value.json.return_value = {'id': 'my-change-request-id'}
 
     monkeypatch.setattr('zalando_deploy_cli.cli.request', request)
-    monkeypatch.setattr('zalando_deploy_cli.cli._scale_deployment', MagicMock())
+    monkeypatch.setattr('zalando_deploy_cli.cli._scale_deployment',
+                        MagicMock())
     monkeypatch.setattr('zalando_deploy_cli.cli.get_replicas', get_replicas)
     monkeypatch.setattr('subprocess.check_output', check_output)
 
@@ -479,7 +507,8 @@ def test_promote_deployment(monkeypatch, mock_config):
     monkeypatch.setattr('zalando_deploy_cli.cli.request', request)
 
     runner = CliRunner()
-    result = runner.invoke(cli, ['promote-deployment', 'myapp', 'v2', 'r42', 'production'])
+    result = runner.invoke(cli, ['promote-deployment', 'myapp', 'v2', 'r42',
+                                 'production'])
     assert 'Promoting deployment myapp-v2-r42 to production stage..\nmy-change-request-id' == result.output.strip()
 
 
@@ -505,13 +534,16 @@ def test_request_headers(monkeypatch, capsys):
         response.json.return_value = kwargs.get('headers')
         return response
 
-    response = zalando_deploy_cli.cli.request({'user': 'jdoe'}, mock_get, 'https://example.org')
-    assert {'Authorization': 'Bearer mytok', 'X-On-Behalf-Of': 'jdoe'} == response.json()
+    response = zalando_deploy_cli.cli.request({'user': 'jdoe'}, mock_get,
+                                              'https://example.org')
+    assert {'Authorization': 'Bearer mytok',
+            'X-On-Behalf-Of': 'jdoe'} == response.json()
 
 
 def test_get_current_replicas(monkeypatch, mock_config):
     kubectl_get = MagicMock()
-    kubectl_get.return_value = {'items': [{'status': {'replicas': 1}}, {'status': {'replicas': 2}}]}
+    kubectl_get.return_value = {
+        'items': [{'status': {'replicas': 1}}, {'status': {'replicas': 2}}]}
     monkeypatch.setattr('zalando_deploy_cli.cli.kubectl_get', kubectl_get)
 
     runner = CliRunner()
@@ -529,6 +561,15 @@ def test_get_aws_account_name(monkeypatch):
 
     load_config.return_value = {}
     assert get_aws_account_name() == "unknown-account"
+
+def test_get_cluster_registry_url(monkeypatch):
+    zkubectl_config = {'cluster_registry': 'https://cluster-registry.example.com'}
+    load_config = MagicMock(return_value=zkubectl_config)
+    monkeypatch.setattr('stups_cli.config.load_config', load_config)
+    assert get_cluster_registry_url() == 'https://cluster-registry.example.com'
+
+    load_config.return_value = {}
+    assert get_cluster_registry_url() is None
 
 
 def test_encrypt(monkeypatch, mock_config):
@@ -584,9 +625,9 @@ def test_encrypt(monkeypatch, mock_config):
     encrypted = result.output.strip()
     assert "deployment-secret:autobahn-encrypted:barFooBAR=" == encrypted
 
-
     encrypt_call.assert_called_with(mock_config(), requests.post,
-                                    mock_config().get('deploy_api') + '/secrets',
+                                    mock_config().get(
+                                        'deploy_api') + '/secrets',
                                     json={'plaintext': 'my_secret'})
 
 
@@ -596,14 +637,107 @@ def test_resolve_version(monkeypatch):
     runner = CliRunner()
     with runner.isolated_filesystem():
         with open('template.yaml', 'w') as fd:
-            yaml.dump({'spec': {'template': {'spec': {'containers': [{'image': 'myregistry.example.org/foo/bar:{{version}}'}]}}}}, fd)
-        result = runner.invoke(cli, ['resolve-version', 'template.yaml', 'my-app', 'latest', 'r1', 'replicas=3'], catch_exceptions=False)
+            yaml.dump({'spec': {'template': {'spec': {'containers': [
+                {'image': 'myregistry.example.org/foo/bar:{{version}}'}]}}}},
+                      fd)
+        result = runner.invoke(cli,
+                               ['resolve-version', 'template.yaml', 'my-app',
+                                'latest', 'r1', 'replicas=3'],
+                               catch_exceptions=False)
         print(result)
     assert 'cd123' == result.output.strip()
 
 
 def test_get_prev_release(monkeypatch):
     services = [
-                {'metadata': {'name': 'myapp-r40', 'labels': {'application': 'myapp', 'release': '2'}}},
-            ]
+        {'metadata': {'name': 'myapp-r40',
+                      'labels': {'application': 'myapp', 'release': '2'}}},
+    ]
     assert '2' == get_prev_release(services, "1")
+
+
+def test_configure_for_cluster(monkeypatch, mock_config):
+    mock_get = MagicMock()
+    mock_response = MagicMock()
+    mock_get.return_value = mock_response
+    monkeypatch.setattr('requests.get', mock_get)
+
+    mock_store_config = MagicMock()
+    monkeypatch.setattr('stups_cli.config.store_config', mock_store_config)
+
+    monkeypatch.setattr('zign.api.get_token', lambda a, b: 'mytok')
+
+    monkeypatch.setattr('zalando_deploy_cli.cli.get_cluster_registry_url',
+                        MagicMock(return_value="https://example.com"))
+
+    runner = CliRunner()
+
+    mock_response.json.return_value = {
+        "items": [
+            {
+                "alias": "test",
+                "api_server_url": "https://kube-1.example.com",
+                "channel": "test",
+                "config_items": {},
+                "criticality_level": 1,
+                "environment": "test",
+                "id": "aws:1234:eu-central-1:kube-1",
+                "infrastructure_account": "aws:1234",
+                "lifecycle_status": "ready",
+                "local_id": "kube-1",
+                "node_pools": [],
+                "provider": "zalando-aws",
+                "region": "eu-central-1",
+                "status": {}
+            }
+        ]
+    }
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["configure-for-cluster", "test"])
+        mock_store_config.assert_called_with(
+            {
+                'kubernetes_namespace': 'mynamespace',
+                'kubernetes_cluster': 'aws:1234:eu-central-1:kube-1',
+                'deploy_api': 'https://deploy.example.org',
+                'aws_account': 'aws:1234',
+                'kubernetes_api_server': 'https://kube-1.example.com'
+            },
+            'zalando-deploy-cli'
+        )
+        assert result.exit_code == 0
+        mock_get.assert_called_once_with(
+            'https://example.com/kubernetes-clusters?alias=test',
+            headers={'Authorization': 'Bearer mytok'},
+            timeout=30
+        )
+        mock_get.reset_mock()
+
+    with runner.isolated_filesystem():
+        mock_get.reset_mock()
+        runner.invoke(cli, ["configure-for-cluster",
+                            "--cluster-registry-url", "https://example.org",
+                            "test"])
+        mock_get.assert_called_once_with(
+            'https://example.org/kubernetes-clusters?alias=test',
+            headers={'Authorization': 'Bearer mytok'},
+            timeout=30
+        )
+
+    mock_response.json.return_value = {"items": []}
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["configure-for-cluster", "test"])
+        assert result.output.strip() == "Cluster 'test' not found."
+        assert result.exit_code == 1
+
+    mock_response.ok = False
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["configure-for-cluster", "test"])
+        assert "Server returned HTTP error" in result.output
+        assert result.exit_code == 2
+
+    monkeypatch.setattr('zalando_deploy_cli.cli.get_cluster_registry_url',
+                        MagicMock(return_value=None))
+    with runner.isolated_filesystem():
+        result = runner.invoke(cli, ["configure-for-cluster", "test"])
+        assert result.output.strip() == "No Cluster Registry URL provided."
+        assert result.exit_code == 1

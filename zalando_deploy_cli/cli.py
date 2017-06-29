@@ -50,6 +50,16 @@ EC2_INSTANCE_MEMORY = {
 }
 
 
+
+def get_cluster_registry_url():
+    try:
+        zkubectl_config = stups_cli.config.load_config("zalando-kubectl")
+        default_cluster_registry = zkubectl_config['cluster_registry']
+    except:
+        default_cluster_registry = None
+    return default_cluster_registry
+
+
 def get_aws_account_name() -> str:
 
     try:
@@ -200,6 +210,50 @@ def configure(config, **kwargs):
     for key, val in kwargs.items():
         if val is not None:
             config[key] = val
+    stups_cli.config.store_config(config, 'zalando-deploy-cli')
+
+
+@cli.command("configure-for-cluster")
+@click.option('--cluster-registry-url')
+@click.argument("cluster-alias")
+@click.pass_obj
+def configure_for_cluster(config,
+                          cluster_alias: str, cluster_registry_url: str):
+    """
+    Configures zdeploy to use ``cluster-alias``.
+    """
+    default_cluster_registry = get_cluster_registry_url()
+
+    api_url = cluster_registry_url or default_cluster_registry
+
+    if not api_url:
+        error("No Cluster Registry URL provided.")
+        exit(1)
+
+    token = zign.api.get_token('uid', ['uid'])
+    headers = {'Authorization': 'Bearer {}'.format(token)}
+    path = '/kubernetes-clusters?alias=' + cluster_alias
+    url = urllib.parse.urljoin(api_url, path)
+
+    response = requests.get(url, headers=headers, timeout=DEFAULT_HTTP_TIMEOUT)
+    if not response.ok:
+        error('Server returned HTTP error {} for {}:\n'
+              '{}'.format(response.status_code, url, response.text))
+        exit(2)
+
+    clusters = response.json()['items']
+    if not clusters:
+        error("Cluster '{alias}' not found.".format(alias=cluster_alias))
+        exit(1)
+
+    cluster = clusters.pop()
+    config['aws_account'] = cluster['infrastructure_account']
+    config['kubernetes_api_server'] = cluster["api_server_url"]
+    config['kubernetes_cluster'] = cluster["id"]
+    print("New configuration:\n"
+          "  aws_account: {aws_account}\n"
+          "  kubernetes_api_server: {kubernetes_api_server}\n"
+          "  kubernetes_cluster: {kubernetes_cluster}".format_map(config))
     stups_cli.config.store_config(config, 'zalando-deploy-cli')
 
 

@@ -882,7 +882,12 @@ def encrypt(config, use_kms, kms_keyid, region):
 
     if use_kms:
         if not kms_keyid:
-            cluster = config.get('kubernetes_cluster')
+            try:
+                cluster = config['kubernetes_cluster']
+            except KeyError:
+                error("'kubernetes-cluster' not set. "
+                      "Please configure zdeploy.")
+                sys.exit(1)
             local_id = cluster.rsplit(':')[-1]
             kms_keyid = 'alias/{}-deployment-secret'.format(local_id)
         try:

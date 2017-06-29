@@ -92,6 +92,27 @@ You can also just use the Mustache_ template interpolation manually:
 
     $ zdeploy render-template my-manifest.yaml foo=bar var2=123
 
+Configure for Cluster
+=====================
+You can automatically set Kubernetes Cluster specific configuration using the
+cluster's alias:
+
+.. code-block:: bash
+
+    $ zdeploy configure-for-cluster ALIAS
+
+    New configuration:
+      aws_account: aws:7..
+      kubernetes_api_server: https://kube-1.example.org
+      kubernetes_cluster: aws:7..:kube-1
+
+If you don't have zkubectl_ configured you also need to provide the Cluster
+Registry URL:
+
+.. code-block:: bash
+
+    $ zdeploy configure-for-cluster --cluster-registry-url https://registry.example.org ALIAS
+
 
 .. _zkubectl: https://github.com/zalando-incubator/zalando-kubectl
 .. _Mustache: http://mustache.github.io/
